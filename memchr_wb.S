@@ -1,86 +1,101 @@
 .equ REP_01, 0x0101010101010101
-.equ REGSIZE, 8
+.equ REP_80, 0x8080808080808080
+.equ SZREG, 8
 .equ mask, 0xFF
+.equ MIN_BORDER, 128
 
 .text
 .global memchrasm
 
 memchrasm:
+	andi a1, a1, 0xFF
 
-# use byte-wide iteration for small numbers
-add t1, x0, a2
-sltiu t2, a2, 128
-bnez t2, iter_reminder
+	# use byte-wide iteration for small numbers
+	mv t1, a2
+	sltiu t2, a2, MIN_BORDER
+	bnez t2, 6f
 
-# get the number of bytes we should iterate before alignment
-andi t0, a0, REGSIZE - 1
-beqz t0, continue
-xor t0, t0, 0x07
-addi t0, t0, 1
+	# get the number of bytes we should iterate before alignment
+	andi t0, a0, SZREG - 1
+	beqz t0, 4f
 
-sub a2, a2, t0
-# iterate before alignment
-pre_align:
-beq t0, x0, continue
-lb t2, 0(a0)
-beq t2, a1, fw2
-addi t0, t0, -1
-addi a0, a0, 1
-j pre_align
+	xori t0, t0, SZREG - 1
+	addi t0, t0, 1
 
-found_word:
-li t1, REGSIZE
-j iter_reminder
-fw2:
-ret
+	sub a2, a2, t0
+	# iterate before alignment
+	add t0, t0, a0
+1:
+	beq a0, t0, 4f
+	lbu t2, 0(a0)
+	beq t2, a1, 9f
+	addi a0, a0, 1
+	j 1b
 
-continue:
-# get the count reminder
-andi t1, a2, REGSIZE - 1
+2:
+	# found a word. Iterate it until we find the target byte
+	li t1, SZREG
+	j 6f
 
-# align the count
-sub a2, a2, t1
+4:
+	# get the count remainder
+	andi t1, a2, SZREG - 1
 
-beqz a2, iter_reminder
+	# align the count
+	sub a2, a2, t1
 
-# get 0xTBTBTBTBTBTBTBTB from 0xTB
-li t3, REP_01
-mul t3, t3, a1
+	# if we have no words to iterate, iterate the remainder
+	beqz a2, 6f
 
-add a2, a2, a0
+	# from 0xBA we will get 0xBABABABABABABABA
+	mv t3, a1
+	slli t3, t3, 8
+	or t3, t3, a1
+	slli t4, t3, 16
+	or t3, t4, t3
 
-li t4, REP_01
-li t5, 0x8080808080808080
+#if __riscv_xlen == 64
+	slli t4, t3, 32
+	or t3, t4, t3
+#endif
 
-iter_words:
-ld t2, 0(a0)
+	add a2, a2, a0
 
-xor t2, t2, t3
+	li t4, REP_01
+	li t5, REP_80
 
-sub t0, t2, t4
+5:
+	ld t2, 0(a0)
 
-not t2, t2
+	# after this xor we will get one zero byte in the word if it contains the target byte
+	xor t2, t2, t3
 
-and t0, t0, t2
-and t0, t0, t5
+	# word v contains the target byte if (v - 0x01010101) & (~v) & 0x80808080 != 0
+	sub t0, t2, t4
 
-bnez t0, found_word
-addi a0, a0, REGSIZE
-bne a0, a2, iter_words
+	not t2, t2
 
-iter_reminder:
-beq t1, x0, exit
-lb t4, 0(a0)
-beq t4, a1, fw2
-addi a0, a0, 1
-addi t1, t1, -1
-j iter_reminder
+	and t0, t0, t2
+	and t0, t0, t5
 
-exit:
-addi a0, x0, 0
-ret
+	bnez t0, 2b
+	addi a0, a0, SZREG
+	bne a0, a2, 5b
 
-
+6:
+	# iterate the remainder
+	add t1, a0, t1
+7:	
+	beq a0, t1, 8f
+	lbu t4, 0(a0)
+	beq t4, a1, 9f
+	addi a0, a0, 1
+	j 7b
+8:
+	li a0, 0
+9:
+	ret
+	andi a1, a1, 0xFF
 ##################################
 .global memchr2
 memchr2:

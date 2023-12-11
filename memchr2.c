@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdbool.h>
 
 #define MIN(a, b) a < b ? a : b
 
@@ -23,18 +24,7 @@ extern char *memchr2(void *data, char target, unsigned int count);
 extern int memcmp_asm(void *src1, void *src2, int count);
 extern int memcmp_orig(void *src1, void *src2, int count);
 
-void *memchr_c(const void *s, int c, size_t n)
-{
-	const unsigned char *p = s;
-	while (n-- != 0) {
-        	if ((unsigned char)c == *p++) {
-			return (void *)(p - 1);
-		}
-	}
-	return NULL;
-}
-
-void test_memcmp(const struct test_description *desc, struct test_result *result)
+void test_memcmp(const struct test_description *desc, struct test_result *result, bool aligned)
 {
 	unsigned char *buffer1 = calloc(desc->array_size, 1);
 	unsigned char *buffer2 = calloc(desc->array_size, 1);
@@ -46,11 +36,13 @@ void test_memcmp(const struct test_description *desc, struct test_result *result
 	result->desc = desc;
 
 	for (i = 0; i < desc->count; i++) {
-		int num = desc->array_size - (rand() % (desc->array_size / 10)) - 1;
+		int num = desc->array_size - 1;
 		buffer1[num] = rand() % 2;
 		buffer2[num] = rand() % 2;
-		int st = rand() % (desc->array_size / 20);
-		int st2 = rand() % (desc->array_size / 20);
+		int st = i % 8;
+		int st2 = (i + 1) % 8;
+		if (aligned)
+			st2 = i % 8;
 		int cnt = MIN(desc->array_size - st, desc->array_size - st2);
 
 		start = clock();
@@ -87,7 +79,7 @@ void test_memcmp(const struct test_description *desc, struct test_result *result
 
 }
 
-void test_memchr(const struct test_description *desc, struct test_result *result)
+void test_memchr(const struct test_description *desc, struct test_result *result, bool aligned)
 {
 	unsigned char *data = calloc(desc->array_size, 1);
 	clock_t start, end;
@@ -179,60 +171,49 @@ const struct test_description tests[] = {
 		.array_size = 1024 * 1024,
 		.count = 1000,
 	},
-	{
-		.array_size = 1024 * 1024 * 10,
-		.count = 500,
-	},
-	{
-		.array_size = 1024 * 1024 * 128,
-		.count = 100,
-	},
-	{
-		.array_size = 1024 * 1024 * 512,
-		.count = 20,
-	},
-	{
-		.array_size = 1024 * 1024 * 1024,
-		.count = 20,
-	},
-};
+	};
+
+void print_test_results(struct test_result *results, int count, bool aligned, char *test_title)
+{
+	int i;
+
+	printf("%s (%s)\n", test_title, aligned ? "aligned" : "misaligned");
+	printf("---------------\n");
+	printf("| test_count | array_size | old_func_cycles | new_func_cycles |     K    |\n");
+	printf("--------------------------------------------------------------------------\n");
+	for (i = 0; i < count; i++) {
+		printf("| %10d | %10d | %15lf | %15lf | %5lf |\n", results[i].desc->count, results[i].desc->array_size,
+		       results[i].mean_old, results[i].mean_new, results[i].mean_old / results[i].mean_new);
+	}
+}
 
 int main(int argc, char *argv[])
 {
 	int count = sizeof(tests) / sizeof(tests[0]);
-	struct test_result *results_memchr = calloc(sizeof(struct test_result), count);
-	struct test_result *results_memcmp = calloc(sizeof(struct test_result), count);
+	struct test_result *results = calloc(sizeof(struct test_result), count);
 	int i;
 
 	srand(time(NULL));
 
 	for (i = 0; i < count; i++) {
-		printf("Running memchr %d/%d: count = %d, array size = %d\n", (i + 1), count, tests[i].count, tests[i].array_size);
-		test_memchr(&tests[i], &results_memchr[i]);
-		printf("Running memcmp %d/%d: count = %d, array size = %d\n", (i + 1), count, tests[i].count, tests[i].array_size);
-		test_memcmp(&tests[i], &results_memcmp[i]);
+		printf("Running memchr(misaligned) %d/%d: count = %d, array size = %d\n", (i + 1), count, tests[i].count, tests[i].array_size);
+		test_memchr(&tests[i], &results[i], 0);
 	}
 
-	printf("memchr\n");
-	printf("------\n");
-	printf("| test_count | array_size | old_func_cycles | new_func_cycles |     K    |\n");
-	printf("--------------------------------------------------------------------------\n");
+	print_test_results(results, count, 0, "memchr");
 
 	for (i = 0; i < count; i++) {
-		printf("| %10d | %10d | %15lf | %15lf | %5lf |\n", results_memchr[i].desc->count, results_memchr[i].desc->array_size,
-		       results_memchr[i].mean_old, results_memchr[i].mean_new, results_memchr[i].mean_old / results_memchr[i].mean_new);
+		printf("Running memcmp(misaligned) %d/%d: count = %d, array size = %d\n", (i + 1), count, tests[i].count, tests[i].array_size);
+		test_memcmp(&tests[i], &results[i], 0);
 	}
-	printf("memcmp\n");
-	printf("------\n");
-	printf("| test_count | array_size | old_func_cycles | new_func_cycles |     K    |\n");
-	printf("--------------------------------------------------------------------------\n");
+	print_test_results(results, count, 0, "memcmp");
 
 	for (i = 0; i < count; i++) {
-		printf("| %10d | %10d | %15lf | %15lf | %5lf |\n", results_memcmp[i].desc->count, results_memcmp[i].desc->array_size,
-		       results_memcmp[i].mean_old, results_memcmp[i].mean_new, results_memcmp[i].mean_old / results_memcmp[i].mean_new);
+		printf("Running memcmp(aligned) %d/%d: count = %d, array size = %d\n", (i + 1), count, tests[i].count, tests[i].array_size);
+		test_memcmp(&tests[i], &results[i], 1);
 	}
+	print_test_results(results, count, 1, "memcmp");
+	free(results);
 
-	free(results_memchr);
-	free(results_memcmp);
 	return 0;
 }
