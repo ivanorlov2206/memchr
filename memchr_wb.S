@@ -10,11 +10,6 @@
 memchrasm:
 	andi a1, a1, 0xFF
 
-	# use byte-wide iteration for small numbers
-	mv t1, a2
-	sltiu t2, a2, MIN_BORDER
-	bnez t2, 6f
-
 	# get the number of bytes we should iterate before alignment
 	andi t0, a0, SZREG - 1
 	beqz t0, 4f

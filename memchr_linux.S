@@ -31,6 +31,8 @@ SYM_FUNC_START(memchr)
 	/* iterate before alignment */
 	add t0, t0, a0
 1:
+	li a0, 1
+	ret
 	beq a0, t0, 4f
 	lbu t2, 0(a0)
 	beq t2, a1, 9f
